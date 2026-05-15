@@ -34,7 +34,6 @@ jobs:
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           GIT_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
           IMAGE_TAG="${{ github.event.inputs.image_tag || 'latest' }}"
-          echo "IMAGE_BASE=ghcr.io/${REPO_LC}" >> "$GITHUB_ENV"
           echo "SHA_TAG=ghcr.io/${REPO_LC}:${GIT_SHA}" >> "$GITHUB_ENV"
           echo "LATEST_TAG=ghcr.io/${REPO_LC}:${IMAGE_TAG}" >> "$GITHUB_ENV"
           echo "GIT_SHA=${GIT_SHA}" >> "$GITHUB_ENV"
@@ -53,16 +52,6 @@ jobs:
           docker push "$LATEST_TAG"
           echo "Pushed $SHA_TAG and $LATEST_TAG"
 
-      - name: Sync deploy files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "scripts/deploy.sh,docker-compose.prod.yml"
-          target: "/opt/statuspulse"
-          strip_components: 0
-
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -70,23 +59,16 @@ jobs:
           DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_USER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GIT_SHA: ${{ env.GIT_SHA }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: APP_IMAGE,DOMAIN_NAME,GHCR_TOKEN,GHCR_USER
+          port: 22
+          envs: APP_IMAGE,DOMAIN_NAME,GHCR_TOKEN,GHCR_USER,GITHUB_REPOSITORY,GIT_SHA
           script_stop: true
-          script: |
-            set -euxo pipefail
-            if [ -n "${GHCR_TOKEN:-}" ]; then
-              echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            fi
-            cd /opt/statuspulse
-            cp -f docker-compose.prod.yml docker-compose.yml
-            mv -f scripts/deploy.sh ./deploy.sh 2>/dev/null || true
-            chmod +x deploy.sh
-            export APP_IMAGE DOMAIN_NAME
-            ./deploy.sh
+          script_path: scripts/github-remote-deploy.sh
 
       - name: Post-deployment health check (on server)
         uses: appleboy/ssh-action@v1.2.0
@@ -94,6 +76,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
           script: |
             curl -fsS -H "Host: ${{ secrets.DOMAIN_NAME }}" http://127.0.0.1/health | head -c 500
             echo ""
@@ -104,12 +87,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `✅ **StatusPulse deploy succeeded**\n- Image: \`${{ env.LATEST_TAG }}\`\n- URL: https://${{ secrets.DOMAIN_NAME }}/health`;
-            console.log(body);
+            console.log(`✅ Deploy succeeded: ${{ env.LATEST_TAG }} → https://${{ secrets.DOMAIN_NAME }}/health`);
 
       - name: Notify on failure
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            console.log('❌ StatusPulse deploy failed — expand the Deploy to server via SSH step above.');
+            console.log('❌ Deploy failed — fix SSH_PRIVATE_KEY secret (see README) or check SSH step logs.');
