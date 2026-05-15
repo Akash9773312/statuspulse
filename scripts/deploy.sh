@@ -60,6 +60,8 @@ start_app() {
   docker_cmd run -d \
     --name statuspulse-app \
     --network "$NETWORK_NAME" \
+    --network-alias app \
+    --network-alias statuspulse-app \
     --env-file "$DEPLOY_DIR/.env" \
     --restart unless-stopped \
     --memory 384m \

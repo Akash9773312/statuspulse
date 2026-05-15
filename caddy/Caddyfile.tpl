@@ -1,7 +1,7 @@
 __DOMAIN__ {
 	encode gzip
 
-	reverse_proxy app:8000
+	reverse_proxy statuspulse-app:8000
 
 	header {
 		X-Content-Type-Options nosniff
