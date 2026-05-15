@@ -8,6 +8,23 @@ COMPOSE="docker-compose"
 DOMAIN_NAME="${DOMAIN_NAME:-}"
 APP_IMAGE="${APP_IMAGE:-}"
 
+# Use sudo for docker if not in docker group
+docker_cmd() {
+  if docker info >/dev/null 2>&1; then
+    docker "$@"
+  else
+    sudo docker "$@"
+  fi
+}
+
+compose_cmd() {
+  if docker info >/dev/null 2>&1; then
+    $COMPOSE "$@"
+  else
+    sudo $COMPOSE "$@"
+  fi
+}
+
 log() {
   echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
 }
@@ -20,29 +37,34 @@ if [[ -z "$APP_IMAGE" ]]; then
 fi
 
 if [[ -z "$DOMAIN_NAME" ]]; then
-  DOMAIN_NAME=$(grep -E '^[a-zA-Z0-9._-]+ \{' caddy/Caddyfile 2>/dev/null | head -1 | awk '{print $1}' || true)
+  if [[ -f caddy/Caddyfile ]]; then
+    DOMAIN_NAME=$(grep -E '^[a-zA-Z0-9._-]+ \{' caddy/Caddyfile | head -1 | awk '{print $1}')
+  elif [[ -f Caddyfile ]]; then
+    DOMAIN_NAME=$(grep -E '^[a-zA-Z0-9._-]+ \{' Caddyfile | head -1 | awk '{print $1}')
+  fi
 fi
 
-log "Stopping host Caddy if present"
+log "Deploying image: $APP_IMAGE (domain: ${DOMAIN_NAME:-unknown})"
+
 sudo systemctl stop caddy 2>/dev/null || true
 sudo systemctl disable caddy 2>/dev/null || true
 
 PREVIOUS_IMAGE=""
-if docker inspect statuspulse-app >/dev/null 2>&1; then
-  PREVIOUS_IMAGE=$(docker inspect --format='{{.Config.Image}}' statuspulse-app)
+if docker_cmd inspect statuspulse-app >/dev/null 2>&1; then
+  PREVIOUS_IMAGE=$(docker_cmd inspect --format='{{.Config.Image}}' statuspulse-app)
   log "Previous image: $PREVIOUS_IMAGE"
 fi
 
 log "Pulling image: $APP_IMAGE"
-docker pull "$APP_IMAGE"
+docker_cmd pull "$APP_IMAGE"
 
 export APP_IMAGE
 
 log "Ensuring data services are up"
-sudo $COMPOSE up -d postgres redis caddy uptime-kuma 2>/dev/null || $COMPOSE up -d postgres redis caddy uptime-kuma
+compose_cmd up -d postgres redis caddy uptime-kuma
 
 log "Starting new app container"
-sudo $COMPOSE up -d --no-deps --force-recreate app
+compose_cmd up -d --no-deps --force-recreate app
 
 log "Waiting for health check"
 sleep 15
@@ -57,13 +79,14 @@ done
 
 if [[ "$HEALTH_OK" != "true" ]]; then
   log "Health check FAILED — rolling back"
+  compose_cmd logs --tail=30 app || true
   if [[ -n "$PREVIOUS_IMAGE" && "$PREVIOUS_IMAGE" != "$APP_IMAGE" ]]; then
     export APP_IMAGE="$PREVIOUS_IMAGE"
     log "Rollback to: $PREVIOUS_IMAGE"
-    docker pull "$PREVIOUS_IMAGE" || true
-    sudo $COMPOSE up -d --no-deps --force-recreate app
+    docker_cmd pull "$PREVIOUS_IMAGE" || true
+    compose_cmd up -d --no-deps --force-recreate app
   else
-    sudo $COMPOSE stop app || true
+    compose_cmd stop app || true
   fi
   exit 1
 fi

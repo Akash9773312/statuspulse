@@ -3,6 +3,7 @@
 services:
   app:
     image: ${APP_IMAGE:-statuspulse-app:local}
+    pull_policy: always
     build:
       context: .
       dockerfile: Dockerfile
