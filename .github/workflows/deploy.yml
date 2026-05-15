@@ -53,6 +53,16 @@ jobs:
           docker push "$LATEST_TAG"
           echo "Pushed $SHA_TAG and $LATEST_TAG"
 
+      - name: Sync deploy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "scripts/deploy.sh,docker-compose.prod.yml"
+          target: "/opt/statuspulse"
+          strip_components: 0
+
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -72,9 +82,11 @@ jobs:
               echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin
             fi
             cd /opt/statuspulse
-            export APP_IMAGE DOMAIN_NAME
+            cp -f docker-compose.prod.yml docker-compose.yml
+            mv -f scripts/deploy.sh ./deploy.sh 2>/dev/null || true
             chmod +x deploy.sh
-            sudo -E ./deploy.sh
+            export APP_IMAGE DOMAIN_NAME
+            ./deploy.sh
 
       - name: Post-deployment health check (on server)
         uses: appleboy/ssh-action@v1.2.0

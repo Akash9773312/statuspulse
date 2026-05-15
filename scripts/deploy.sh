@@ -1,29 +1,16 @@
 #!/usr/bin/env bash
-# Production deploy — pull GHCR image, zero-downtime app update, rollback on failure
+# Production deploy — pull GHCR image, update app container, rollback on failure
 set -euo pipefail
 
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/statuspulse}"
 LOG_FILE="${LOG_FILE:-/var/log/statuspulse-deploy.log}"
-COMPOSE="docker-compose"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+NETWORK_NAME="${NETWORK_NAME:-statuspulse-prod}"
 DOMAIN_NAME="${DOMAIN_NAME:-}"
 APP_IMAGE="${APP_IMAGE:-}"
 
-# Use sudo for docker if not in docker group
-docker_cmd() {
-  if docker info >/dev/null 2>&1; then
-    docker "$@"
-  else
-    sudo docker "$@"
-  fi
-}
-
-compose_cmd() {
-  if docker info >/dev/null 2>&1; then
-    $COMPOSE "$@"
-  else
-    sudo $COMPOSE "$@"
-  fi
-}
+docker_cmd() { sudo docker "$@"; }
+compose_cmd() { sudo docker-compose -f "$COMPOSE_FILE" "$@"; }
 
 log() {
   echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
@@ -58,13 +45,29 @@ fi
 log "Pulling image: $APP_IMAGE"
 docker_cmd pull "$APP_IMAGE"
 
-export APP_IMAGE
+log "Ensuring data services are running"
+for c in statuspulse-postgres statuspulse-redis statuspulse-caddy statuspulse-uptime-kuma; do
+  if ! docker_cmd ps -a --format '{{.Names}}' | grep -qx "$c"; then
+    log "ERROR: container $c missing — run bootstrap.py first"
+    exit 1
+  fi
+  docker_cmd start "$c" 2>/dev/null || true
+done
 
-log "Ensuring data services are up"
-compose_cmd up -d postgres redis caddy uptime-kuma
+start_app() {
+  local image="$1"
+  docker_cmd rm -f statuspulse-app 2>/dev/null || true
+  docker_cmd run -d \
+    --name statuspulse-app \
+    --network "$NETWORK_NAME" \
+    --env-file "$DEPLOY_DIR/.env" \
+    --restart unless-stopped \
+    --memory 384m \
+    "$image"
+}
 
-log "Starting new app container"
-compose_cmd up -d --no-deps --force-recreate app
+log "Starting app container"
+start_app "$APP_IMAGE"
 
 log "Waiting for health check"
 sleep 15
@@ -79,14 +82,13 @@ done
 
 if [[ "$HEALTH_OK" != "true" ]]; then
   log "Health check FAILED — rolling back"
-  compose_cmd logs --tail=30 app || true
+  docker_cmd logs --tail=30 statuspulse-app 2>/dev/null || true
   if [[ -n "$PREVIOUS_IMAGE" && "$PREVIOUS_IMAGE" != "$APP_IMAGE" ]]; then
-    export APP_IMAGE="$PREVIOUS_IMAGE"
     log "Rollback to: $PREVIOUS_IMAGE"
     docker_cmd pull "$PREVIOUS_IMAGE" || true
-    compose_cmd up -d --no-deps --force-recreate app
+    start_app "$PREVIOUS_IMAGE"
   else
-    compose_cmd stop app || true
+    docker_cmd rm -f statuspulse-app 2>/dev/null || true
   fi
   exit 1
 fi
