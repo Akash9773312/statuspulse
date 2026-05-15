@@ -29,6 +29,7 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
+          failure-threshold: error
 
       - name: Build Docker image
         run: docker build -t statuspulse:ci .
@@ -79,4 +80,7 @@ jobs:
 
       - name: Tear down stack
         if: always()
-        run: docker compose down -v
+        run: |
+          if [ -f .env ]; then
+            docker compose down -v --remove-orphans
+          fi
