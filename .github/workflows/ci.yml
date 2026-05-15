@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check app/
+
+      - name: Lint Dockerfile with hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Build Docker image
+        run: docker build -t statuspulse:ci .
+
+      - name: Verify image size under 200MB
+        run: |
+          SIZE=$(docker images statuspulse:ci --format '{{.Size}}')
+          echo "Image size: $SIZE"
+          BYTES=$(docker inspect statuspulse:ci --format='{{.Size}}')
+          MAX=$((200 * 1024 * 1024))
+          if [ "$BYTES" -gt "$MAX" ]; then
+            echo "Image exceeds 200MB ($BYTES bytes)"
+            exit 1
+          fi
+
+      - name: Start stack
+        run: |
+          cp .env.example .env
+          sed -i 's/change-me/statuspulse-ci/g' .env
+          docker compose up -d
+          docker compose ps
+
+      - name: Wait for healthy services
+        run: |
+          for i in $(seq 1 30); do
+            docker compose ps | grep -q unhealthy && sleep 5 && continue
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 5
+          done
+          docker compose logs
+          exit 1
+
+      - name: Run integration tests
+        run: chmod +x tests/test_integration.sh && BASE_URL=http://localhost:8000 tests/test_integration.sh
+
+      - name: Upload test results
+        if: always()
+        run: |
+          mkdir -p test-results
+          curl -sS http://localhost:8000/health > test-results/health.json || true
+          docker compose ps > test-results/compose-ps.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-test-results
+          path: test-results/
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v

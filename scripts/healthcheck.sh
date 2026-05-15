@@ -1,4 +1,5 @@
 #!/bin/bash
-
-curl -f https://statuspulse.umehta.xyz/health \
-|| echo "Healthcheck failed"
+set -e
+DOMAIN="${DOMAIN_NAME:-statuspulse.umehta.xyz}"
+curl -fsS "https://${DOMAIN}/health" | python3 -m json.tool
+echo "Health check passed."

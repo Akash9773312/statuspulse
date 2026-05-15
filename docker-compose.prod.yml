@@ -1,0 +1,97 @@
+# Production stack on server (/opt/statuspulse)
+
+services:
+  app:
+    image: ${APP_IMAGE:-statuspulse-app:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: statuspulse-app
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - statuspulse
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: statuspulse-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-statuspulse}
+      POSTGRES_USER: ${POSTGRES_USER:-statuspulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - statuspulse
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-statuspulse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: statuspulse-redis
+    restart: unless-stopped
+    networks:
+      - statuspulse
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: statuspulse-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - statuspulse
+    depends_on:
+      - app
+      - uptime-kuma
+    mem_limit: 128m
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: statuspulse-uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime_kuma_data:/app/data
+    networks:
+      - statuspulse
+    mem_limit: 256m
+
+networks:
+  statuspulse:
+    driver: bridge
+    name: statuspulse-prod
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  uptime_kuma_data:

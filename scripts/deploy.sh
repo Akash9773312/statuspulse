@@ -1,29 +1,73 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Production deploy — pull GHCR image, zero-downtime app update, rollback on failure
+set -euo pipefail
 
-set -e
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/statuspulse}"
+LOG_FILE="${LOG_FILE:-/var/log/statuspulse-deploy.log}"
+COMPOSE="docker-compose"
+DOMAIN_NAME="${DOMAIN_NAME:-}"
+APP_IMAGE="${APP_IMAGE:-}"
 
-cd /opt/statuspulse
+log() {
+  echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+}
 
+cd "$DEPLOY_DIR"
+
+if [[ -z "$APP_IMAGE" ]]; then
+  log "ERROR: APP_IMAGE is not set"
+  exit 1
+fi
+
+if [[ -z "$DOMAIN_NAME" ]]; then
+  DOMAIN_NAME=$(grep -E '^[a-zA-Z0-9._-]+ \{' caddy/Caddyfile 2>/dev/null | head -1 | awk '{print $1}' || true)
+fi
+
+log "Stopping host Caddy if present"
 sudo systemctl stop caddy 2>/dev/null || true
 sudo systemctl disable caddy 2>/dev/null || true
 
-sudo docker-compose down --remove-orphans 2>/dev/null || true
+PREVIOUS_IMAGE=""
+if docker inspect statuspulse-app >/dev/null 2>&1; then
+  PREVIOUS_IMAGE=$(docker inspect --format='{{.Config.Image}}' statuspulse-app)
+  log "Previous image: $PREVIOUS_IMAGE"
+fi
 
-for port in 80 443 3001; do
-  ids=$(sudo docker ps -q --filter "publish=${port}" 2>/dev/null || true)
-  if [ -n "$ids" ]; then
-    sudo docker stop $ids
-    sudo docker rm $ids
+log "Pulling image: $APP_IMAGE"
+docker pull "$APP_IMAGE"
+
+export APP_IMAGE
+
+log "Ensuring data services are up"
+sudo $COMPOSE up -d postgres redis caddy uptime-kuma 2>/dev/null || $COMPOSE up -d postgres redis caddy uptime-kuma
+
+log "Starting new app container"
+sudo $COMPOSE up -d --no-deps --force-recreate app
+
+log "Waiting for health check"
+sleep 15
+HEALTH_OK=false
+for _ in $(seq 1 12); do
+  if curl -fsS -H "Host: ${DOMAIN_NAME}" http://127.0.0.1/health >/dev/null 2>&1; then
+    HEALTH_OK=true
+    break
   fi
+  sleep 5
 done
 
-sudo docker-compose pull
+if [[ "$HEALTH_OK" != "true" ]]; then
+  log "Health check FAILED — rolling back"
+  if [[ -n "$PREVIOUS_IMAGE" && "$PREVIOUS_IMAGE" != "$APP_IMAGE" ]]; then
+    export APP_IMAGE="$PREVIOUS_IMAGE"
+    log "Rollback to: $PREVIOUS_IMAGE"
+    docker pull "$PREVIOUS_IMAGE" || true
+    sudo $COMPOSE up -d --no-deps --force-recreate app
+  else
+    sudo $COMPOSE stop app || true
+  fi
+  exit 1
+fi
 
-sudo docker-compose up -d --build
-
-sleep 15
-
-DOMAIN=$(grep -E '^[a-zA-Z0-9._-]+ \{' Caddyfile | awk '{print $1}')
-curl -fsS -H "Host: ${DOMAIN}" http://127.0.0.1/health
-
-echo "Deployment successful"
+log "Deploy successful — $(curl -fsS -H "Host: ${DOMAIN_NAME}" http://127.0.0.1/health)"
+echo "$APP_IMAGE" > .deployed-image
+log "Recorded deployed image in .deployed-image"

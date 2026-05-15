@@ -1,41 +1,44 @@
-# Environment and secrets
+# Secrets
 .env
 deploy/.env
-deploy/Caddyfile
 *.pem
 *.key
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 .Python
 .venv/
 venv/
-env/
 
 # Terraform
 .terraform/
 *.tfstate
 *.tfstate.*
 crash.log
-crash.*.log
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-.terraform.tfstate.lock.info
 
-# OS and editors
+# Docker / generated
+deploy/Caddyfile
+caddy/Caddyfile
+.deployed-image
+
+# Legacy deploy folder
+deploy/
+
+# OS / IDE
 .DS_Store
-Thumbs.db
 .idea/
 .vscode/
 *.swp
-*.swo
-*~
 
 # Logs and temp
 *.log
 tmp/
-temp/
+test-results/
+
+# Assessment artifacts (add your own screenshots)
+# screenshots/*.png

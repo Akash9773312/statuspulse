@@ -1,0 +1,103 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: latest)"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+          GIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}"
+          SHA_TAG="${IMAGE}:${GIT_SHA}"
+          LATEST_TAG="${IMAGE}:${IMAGE_TAG}"
+          docker build -t "$SHA_TAG" -t "$LATEST_TAG" .
+          docker push "$SHA_TAG"
+          docker push "$LATEST_TAG"
+          echo "SHA_TAG=$SHA_TAG" >> "$GITHUB_ENV"
+          echo "LATEST_TAG=$LATEST_TAG" >> "$GITHUB_ENV"
+
+      - name: Deploy to server via SSH
+        id: deploy
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_IMAGE: ${{ env.LATEST_TAG }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USER: ${{ github.repository_owner }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: APP_IMAGE,DOMAIN_NAME,GHCR_TOKEN,GHCR_USER
+          script: |
+            set -e
+            if [ -n "$GHCR_TOKEN" ]; then
+              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            fi
+            cd /opt/statuspulse
+            export APP_IMAGE
+            export DOMAIN_NAME
+            chmod +x deploy.sh
+            ./deploy.sh
+
+      - name: Post-deployment health check
+        run: |
+          curl -fsS "https://${{ secrets.DOMAIN_NAME }}/health" | python3 -m json.tool
+
+      - name: Notify on success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `✅ **StatusPulse deploy succeeded**\n- Image: \`${{ env.LATEST_TAG }}\`\n- URL: https://${{ secrets.DOMAIN_NAME }}/health`;
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body
+            }).catch(() => console.log(body));
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `❌ **StatusPulse deploy failed** — check Actions logs. Rollback should have run on the server.`;
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body
+            }).catch(() => console.log(body));
