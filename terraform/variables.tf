@@ -23,6 +23,11 @@ variable "domain_name" {
   type        = string
 }
 
+variable "kuma_domain_name" {
+  description = "Domain for Uptime Kuma (proxied by Caddy)"
+  type        = string
+}
+
 variable "vpc_name" {
   description = "Name tag of the VPC to deploy into"
   type        = string

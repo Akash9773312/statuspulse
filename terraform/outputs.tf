@@ -19,3 +19,11 @@ output "ssh_user" {
 output "app_url" {
   value = "https://${var.domain_name}"
 }
+
+output "kuma_domain_name" {
+  value = var.kuma_domain_name
+}
+
+output "kuma_url" {
+  value = "https://${var.kuma_domain_name}"
+}

@@ -29,7 +29,6 @@ echo '/swapfile none swap sw 0 0' >> /etc/fstab
 ufw allow 22
 ufw allow 80
 ufw allow 443
-ufw allow 3001
 ufw --force enable
 
 if systemctl list-unit-files caddy.service 2>/dev/null | grep -q caddy; then

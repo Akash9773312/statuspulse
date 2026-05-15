@@ -102,7 +102,7 @@ def wait_for_ssh(host: str, user: str, key: Path, timeout: int = 600) -> None:
     die(f"Timed out waiting for SSH on {host}")
 
 
-def prepare_deploy_bundle(domain: str) -> Path:
+def prepare_deploy_bundle(domain: str, kuma_domain: str) -> Path:
     bundle = Path(tempfile.mkdtemp(prefix="statuspulse-deploy-"))
 
     for name in ("docker-compose.yml", "Dockerfile"):
@@ -111,7 +111,10 @@ def prepare_deploy_bundle(domain: str) -> Path:
     shutil.copytree(DEPLOY_DIR / "app", bundle / "app")
 
     caddy_template = (DEPLOY_DIR / "Caddyfile.tpl").read_text()
-    (bundle / "Caddyfile").write_text(caddy_template.replace("__DOMAIN__", domain))
+    caddyfile = (
+        caddy_template.replace("__DOMAIN__", domain).replace("__KUMA_DOMAIN__", kuma_domain)
+    )
+    (bundle / "Caddyfile").write_text(caddyfile)
 
     return bundle
 
@@ -196,12 +199,14 @@ def main() -> None:
     host = terraform_output("server_ip")
     user = terraform_output("ssh_user")
     domain = terraform_output("domain_name")
+    kuma_domain = terraform_output("kuma_domain_name")
     app_url = terraform_output("app_url")
+    kuma_url = terraform_output("kuma_url")
     allocation_id = terraform_output("elastic_ip_allocation_id")
 
     wait_for_ssh(host, user, key)
 
-    bundle = prepare_deploy_bundle(domain)
+    bundle = prepare_deploy_bundle(domain, kuma_domain)
     try:
         sync_to_server(bundle, host, user, key)
         run_remote_deploy(host, user, key, domain)
@@ -212,6 +217,7 @@ def main() -> None:
     print(f"  Elastic IP:      {host}")
     print(f"  Allocation ID:   {allocation_id}")
     print(f"  Application URL: {app_url}")
+    print(f"  Uptime Kuma URL: {kuma_url}")
     print(f"  SSH:             ssh -i {key} {user}@{host}")
     print(f"  Server files:    /opt/statuspulse/")
     print()

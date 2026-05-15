@@ -7,7 +7,7 @@ StatusPulse is a self-hosted status page and service monitoring stack. It runs o
 - **Status API** — Register services, track health, and manage incidents (FastAPI + PostgreSQL)
 - **Caching** — Redis-backed data layer
 - **HTTPS** — Automatic TLS via Caddy (Let's Encrypt) for your configured domain
-- **Uptime Kuma** — External uptime monitoring UI on port `3001`
+- **Uptime Kuma** — Monitoring UI at `https://statuspulse-kuma.<your-domain>` (Caddy + HTTPS)
 - **Stable public IP** — AWS Elastic IP survives instance replacements
 - **One-command bootstrap** — Provision infrastructure, sync code, and start containers
 
@@ -28,7 +28,7 @@ flowchart TB
             App[FastAPI :8000]
             PG[(PostgreSQL)]
             Redis[(Redis)]
-            UK[Uptime Kuma :3001]
+            UK[Uptime Kuma]
         end
     end
 
@@ -116,8 +116,9 @@ Edit `terraform/terraform.tfvars`:
 ```hcl
 key_name        = "statuspulse-key"
 public_key_path = "~/.ssh/id_ed25519.pub"
-domain_name     = "statuspulse.example.com"
-vpc_name        = "Ajax-VPC"
+domain_name      = "statuspulse.example.com"
+kuma_domain_name = "statuspulse-kuma.example.com"
+vpc_name         = "Ajax-VPC"
 ```
 
 ### 2. Configure application secrets (optional)
@@ -169,8 +170,9 @@ curl https://statuspulse.umehta.xyz/health
 |-------------------|--------------------------------------|
 | `key_name`        | AWS SSH key pair name                |
 | `public_key_path` | Path to your `.pub` key (`~` expanded) |
-| `domain_name`     | Domain for Caddy HTTPS + app URL       |
-| `vpc_name`        | VPC `Name` tag (default: `Ajax-VPC`) |
+| `domain_name`      | Domain for StatusPulse API (Caddy HTTPS) |
+| `kuma_domain_name` | Domain for Uptime Kuma (Caddy HTTPS)     |
+| `vpc_name`         | VPC `Name` tag (default: `Ajax-VPC`)      |
 
 Other defaults live in `terraform/variables.tf` (`aws_region`, `instance_type`, `ssh_user`).
 
@@ -248,7 +250,6 @@ All runtime files live on the instance at:
 | 22    | SSH         |
 | 80    | HTTP (Caddy)|
 | 443   | HTTPS       |
-| 3001  | Uptime Kuma |
 
 Restrict SSH (`22`) to your IP in production by editing `terraform/main.tf`.
 

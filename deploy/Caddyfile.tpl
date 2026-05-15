@@ -11,3 +11,17 @@ __DOMAIN__ {
         X-XSS-Protection "1; mode=block"
     }
 }
+
+__KUMA_DOMAIN__ {
+
+    encode gzip
+
+    reverse_proxy uptime-kuma:3001 {
+        flush_interval -1
+    }
+
+    header {
+        X-Content-Type-Options nosniff
+        Strict-Transport-Security "max-age=31536000;"
+    }
+}
