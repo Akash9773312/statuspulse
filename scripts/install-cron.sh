@@ -7,7 +7,7 @@ CRON_FILE="/tmp/statuspulse-cron"
 
 cat > "$CRON_FILE" <<EOF
 # StatusPulse monitoring and backups
-*/5 * * * * DOMAIN_NAME=${DOMAIN_NAME:-statuspulse.umehta.xyz} ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-} ${DIR}/health-monitor.sh
+*/5 * * * * cd ${DIR} && DOMAIN_NAME=${DOMAIN_NAME:-statuspulse.umehta.xyz} ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-} ${DIR}/health-monitor.sh >> /var/log/statuspulse-monitor.log 2>&1
 0 2 * * * ${DIR}/backup.sh
 EOF
 

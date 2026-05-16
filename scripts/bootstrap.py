@@ -100,6 +100,7 @@ def prepare_deploy_bundle(domain: str, kuma_domain: str) -> Path:
     shutil.copytree(ROOT_DIR / "app", bundle / "app")
 
     (bundle / "caddy").mkdir()
+    shutil.copy2(CADDY_DIR / "Dockerfile", bundle / "caddy" / "Dockerfile")
     caddy_tpl = (CADDY_DIR / "Caddyfile.tpl").read_text()
     (bundle / "caddy" / "Caddyfile").write_text(
         caddy_tpl.replace("__DOMAIN__", domain).replace("__KUMA_DOMAIN__", kuma_domain)

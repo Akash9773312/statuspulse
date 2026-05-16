@@ -13,6 +13,8 @@ cd /opt/statuspulse
 BASE="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GIT_SHA}"
 curl -fsSL "${BASE}/scripts/deploy.sh" -o deploy.sh
 curl -fsSL "${BASE}/docker-compose.prod.yml" -o docker-compose.yml
+mkdir -p caddy
+curl -fsSL "${BASE}/caddy/Dockerfile" -o caddy/Dockerfile
 chmod +x deploy.sh
 
 export APP_IMAGE DOMAIN_NAME

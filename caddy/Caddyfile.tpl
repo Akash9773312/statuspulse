@@ -1,5 +1,17 @@
+{
+	order rate_limit before basicauth
+}
+
 __DOMAIN__ {
 	encode gzip
+
+	rate_limit {
+		zone statuspulse_api {
+			key {remote_host}
+			events 100
+			window 1m
+		}
+	}
 
 	reverse_proxy statuspulse-app:8000
 
@@ -14,7 +26,7 @@ __DOMAIN__ {
 __KUMA_DOMAIN__ {
 	encode gzip
 
-	reverse_proxy uptime-kuma:3001 {
+	reverse_proxy statuspulse-uptime-kuma:3001 {
 		flush_interval -1
 	}
 
